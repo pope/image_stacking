@@ -35,24 +35,27 @@ def stackImagesECC(file_list):
     first_image = None
     stacked_image = None
 
-    for file in file_list:
-        image = cv2.imread(file,1).astype(np.float32) / 255
+    for i, file in enumerate(file_list):
         print(file)
+        image = cv2.imread(file, 3)
+        maxColor = 255
+        if image.dtype == np.uint16:
+            maxColor = 65535
+        image = image.astype(np.float32)
+        gray = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY) / maxColor
         if first_image is None:
             # convert to gray scale floating point image
-            first_image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
+            first_image = gray
             stacked_image = image
         else:
             # Estimate perspective transform
-            s, M = cv2.findTransformECC(cv2.cvtColor(image,cv2.COLOR_BGR2GRAY), first_image, M, cv2.MOTION_HOMOGRAPHY)
+            s, M = cv2.findTransformECC(gray, first_image, M, cv2.MOTION_HOMOGRAPHY)
             w, h, _ = image.shape
             # Align image to first image
             image = cv2.warpPerspective(image, M, (h, w))
-            stacked_image += image
+            stacked_image = ((stacked_image * i) + image) / (i + 1)
 
-    stacked_image /= len(file_list)
-    stacked_image = (stacked_image*255).astype(np.uint8)
-    return stacked_image
+    return stacked_image.astype(np.uint16)
 
 
 # Align and stack images by matching ORB keypoints
@@ -68,14 +71,17 @@ def stackImagesKeypointMatching(file_list):
     first_image = None
     first_kp = None
     first_des = None
-    for file in file_list:
+    for i, file in enumerate(file_list):
         print(file)
-        image = cv2.imread(file,1)
-        imageF = image.astype(np.float32) / 255
+        image = cv2.imread(file, 3)
+        imageD = image
+        if image.dtype == np.uint16:
+            imageD = (imageD / 256).astype(np.uint8)
+        imageF = imageD.astype(np.float32) / 255
 
         # compute the descriptors with ORB
-        kp = orb.detect(image, None)
-        kp, des = orb.compute(image, kp)
+        kp = orb.detect(imageD, None)
+        kp, des = orb.compute(imageD, kp)
 
         # create BFMatcher object
         matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
@@ -100,11 +106,9 @@ def stackImagesKeypointMatching(file_list):
             M, mask = cv2.findHomography(dst_pts, src_pts, cv2.RANSAC, 5.0)
             w, h, _ = imageF.shape
             imageF = cv2.warpPerspective(imageF, M, (h, w))
-            stacked_image += imageF
+            stacked_image = ((stacked_image * i) + imageF) / (i + 1)
 
-    stacked_image /= len(file_list)
-    stacked_image = (stacked_image*255).astype(np.uint8)
-    return stacked_image
+    return (stacked_image * 65535).astype(np.uint16)
 
 # ===== MAIN =====
 # Read all files in directory
@@ -127,7 +131,7 @@ if __name__ == '__main__':
 
     file_list = os.listdir(image_folder)
     file_list = [os.path.join(image_folder, x)
-                 for x in file_list if x.endswith(('.jpg', '.png','.bmp'))]
+                 for x in file_list if x.endswith(('.jpg', '.png','.bmp', '.tif'))]
 
     if args.method is not None:
         method = str(args.method)
